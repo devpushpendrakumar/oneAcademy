@@ -1,0 +1,28 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+.next
+.turbo
+out
+
+# Environment — NEVER commit
+.env
+.env.local
+.env.production
+.env*.local
+
+# OS
+.DS_Store
+
+# IDE
+.vscode
+.idea
+
+# Logs
+*.log
+y
+# Testing
+coverage

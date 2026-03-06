@@ -1,0 +1,525 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── ENUMS ──────────────────────────────────────────
+
+enum Role {
+  LEARNER
+  MENTOR
+  CONTENT_MANAGER
+  SUPER_ADMIN
+}
+
+enum PlanType {
+  FREE
+  COURSE_ONLY
+  FULL_PACKAGE
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  DROPPED
+}
+
+enum SubmissionDecision {
+  PENDING
+  APPROVED
+  REVISION_REQUESTED
+  REJECTED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum InternshipStatus {
+  NOT_STARTED
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  DROPPED
+}
+
+// ── USER ──────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  phone        String?
+  passwordHash String?
+  avatar       String?
+  role         Role     @default(LEARNER)
+  city         String?
+  state        String?
+  isVerified   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  enrollments         Enrollment[]
+  quizAttempts        QuizAttempt[]
+  assignmentSubmissions AssignmentSubmission[]
+  sectionProgress     SectionProgress[]
+  certificates        Certificate[]
+  internships         Internship[]
+  payments            Payment[]
+  discussionPosts     DiscussionPost[]
+  mentorSessions      MentorSession[]   @relation("LearnerSessions")
+  mentoredSessions    MentorSession[]   @relation("MentorSessions")
+  mentorNotes         MentorNote[]      @relation("NoteTarget")
+  notesByMe           MentorNote[]      @relation("NoteAuthor")
+
+  @@map("users")
+}
+
+// ── ROADMAP ───────────────────────────────────────
+
+model Roadmap {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  domain      String
+  coverImage  String?
+  isPublished Boolean  @default(false)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  milestones  Milestone[]
+  enrollments Enrollment[]
+
+  @@map("roadmaps")
+}
+
+model Milestone {
+  id          String   @id @default(cuid())
+  roadmapId   String
+  title       String
+  description String
+  order       Int
+  createdAt   DateTime @default(now())
+
+  roadmap Roadmap  @relation(fields: [roadmapId], references: [id])
+  courses Course[]
+
+  @@map("milestones")
+}
+
+// ── COURSE ────────────────────────────────────────
+
+model Course {
+  id           String   @id @default(cuid())
+  milestoneId  String
+  title        String
+  description  String
+  outcomes     String[]
+  coverImage   String?
+  isFree       Boolean  @default(false)
+  isPublished  Boolean  @default(false)
+  passingScore Int      @default(70)
+  order        Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  milestone Milestone @relation(fields: [milestoneId], references: [id])
+  modules   Module[]
+
+  @@map("courses")
+}
+
+model Module {
+  id           String   @id @default(cuid())
+  courseId     String
+  title        String
+  description  String?
+  order        Int
+  passingScore Int      @default(70)
+  createdAt    DateTime @default(now())
+
+  course   Course    @relation(fields: [courseId], references: [id])
+  sections Section[]
+
+  @@map("modules")
+}
+
+model Section {
+  id          String      @id @default(cuid())
+  moduleId    String
+  title       String
+  description String?
+  type        SectionType
+  order       Int
+  isMandatory Boolean     @default(true)
+  isFree      Boolean     @default(false)
+  duration    Int?        // in minutes
+  createdAt   DateTime    @default(now())
+
+  module           Module            @relation(fields: [moduleId], references: [id])
+  video            Video?
+  notes            Notes?
+  quiz             Quiz?
+  assignment       Assignment?
+  progress         SectionProgress[]
+  discussions      DiscussionPost[]
+
+  @@map("sections")
+}
+
+enum SectionType {
+  VIDEO
+  NOTES
+  QUIZ
+  ASSIGNMENT
+}
+
+// ── CONTENT ───────────────────────────────────────
+
+model Video {
+  id           String   @id @default(cuid())
+  sectionId    String   @unique
+  cloudflareId String   // Cloudflare Stream video ID
+  duration     Int      // seconds
+  thumbnailUrl String?
+  subtitleUrl  String?
+  createdAt    DateTime @default(now())
+
+  section Section @relation(fields: [sectionId], references: [id])
+
+  @@map("videos")
+}
+
+model Notes {
+  id        String   @id @default(cuid())
+  sectionId String   @unique
+  content   String   // rich text HTML
+  resources Json?    // downloadable files [{name, url}]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  section Section @relation(fields: [sectionId], references: [id])
+
+  @@map("notes")
+}
+
+// ── QUIZ ──────────────────────────────────────────
+
+model Quiz {
+  id           String   @id @default(cuid())
+  sectionId    String   @unique
+  title        String
+  timeLimit    Int?     // minutes
+  maxAttempts  Int      @default(3)
+  passingScore Int      @default(70)
+  cooldownHrs  Int      @default(24)
+  createdAt    DateTime @default(now())
+
+  section   Section    @relation(fields: [sectionId], references: [id])
+  questions Question[]
+  attempts  QuizAttempt[]
+
+  @@map("quizzes")
+}
+
+model Question {
+  id          String       @id @default(cuid())
+  quizId      String
+  text        String
+  type        QuestionType
+  options     Json         // [{id, text, isCorrect}]
+  explanation String?
+  order       Int
+  points      Int          @default(1)
+
+  quiz Quiz @relation(fields: [quizId], references: [id])
+
+  @@map("questions")
+}
+
+enum QuestionType {
+  MCQ_SINGLE
+  MCQ_MULTIPLE
+  TRUE_FALSE
+  SHORT_ANSWER
+}
+
+model QuizAttempt {
+  id          String   @id @default(cuid())
+  quizId      String
+  userId      String
+  answers     Json     // [{questionId, selectedOptions}]
+  score       Float
+  passed      Boolean
+  timeTaken   Int      // seconds
+  attemptNo   Int
+  completedAt DateTime @default(now())
+
+  quiz Quiz @relation(fields: [quizId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("quiz_attempts")
+}
+
+// ── ASSIGNMENT ────────────────────────────────────
+
+model Assignment {
+  id             String         @id @default(cuid())
+  sectionId      String         @unique
+  title          String
+  description    String
+  requirements   String[]
+  submissionType SubmissionType
+  maxScore       Int            @default(100)
+  passingScore   Int            @default(70)
+  deadline       Int?           // hours allowed
+  createdAt      DateTime       @default(now())
+
+  section     Section               @relation(fields: [sectionId], references: [id])
+  rubric      RubricCriteria[]
+  submissions AssignmentSubmission[]
+
+  @@map("assignments")
+}
+
+enum SubmissionType {
+  GITHUB_URL
+  FILE_UPLOAD
+  TEXT
+  CODE
+}
+
+model RubricCriteria {
+  id           String @id @default(cuid())
+  assignmentId String
+  name         String
+  description  String
+  maxScore     Int
+  order        Int
+
+  assignment Assignment    @relation(fields: [assignmentId], references: [id])
+  scores     RubricScore[]
+
+  @@map("rubric_criteria")
+}
+
+model AssignmentSubmission {
+  id             String             @id @default(cuid())
+  assignmentId   String
+  userId         String
+  content        String             // URL or text
+  notes          String?
+  attemptNo      Int                @default(1)
+  decision       SubmissionDecision @default(PENDING)
+  totalScore     Float?
+  feedback       String?
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  submittedAt    DateTime           @default(now())
+
+  assignment Assignment    @relation(fields: [assignmentId], references: [id])
+  user       User          @relation(fields: [userId], references: [id])
+  scores     RubricScore[]
+
+  @@map("assignment_submissions")
+}
+
+model RubricScore {
+  id           String @id @default(cuid())
+  submissionId String
+  criteriaId   String
+  score        Int
+  comment      String?
+
+  submission AssignmentSubmission @relation(fields: [submissionId], references: [id])
+  criteria   RubricCriteria       @relation(fields: [criteriaId], references: [id])
+
+  @@map("rubric_scores")
+}
+
+// ── PROGRESS ──────────────────────────────────────
+
+model SectionProgress {
+  id          String    @id @default(cuid())
+  userId      String
+  sectionId   String
+  completed   Boolean   @default(false)
+  watchedSecs Int       @default(0) // for video sections
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  section Section @relation(fields: [sectionId], references: [id])
+
+  @@unique([userId, sectionId])
+  @@map("section_progress")
+}
+
+// ── ENROLLMENT ────────────────────────────────────
+
+model Enrollment {
+  id        String           @id @default(cuid())
+  userId    String
+  roadmapId String
+  planType  PlanType
+  status    EnrollmentStatus @default(ACTIVE)
+  cohortId  String?
+  startDate DateTime         @default(now())
+  endDate   DateTime?
+  createdAt DateTime         @default(now())
+
+  user     User      @relation(fields: [userId], references: [id])
+  roadmap  Roadmap   @relation(fields: [roadmapId], references: [id])
+  cohort   Cohort?   @relation(fields: [cohortId], references: [id])
+  payments Payment[]
+
+  @@unique([userId, roadmapId])
+  @@map("enrollments")
+}
+
+// ── COHORT ────────────────────────────────────────
+
+model Cohort {
+  id        String   @id @default(cuid())
+  name      String
+  startDate DateTime
+  capacity  Int
+  createdAt DateTime @default(now())
+
+  enrollments Enrollment[]
+
+  @@map("cohorts")
+}
+
+// ── PAYMENT ───────────────────────────────────────
+
+model Payment {
+  id             String        @id @default(cuid())
+  userId         String
+  enrollmentId   String
+  amount         Int           // in paise (₹1 = 100 paise)
+  currency       String        @default("INR")
+  status         PaymentStatus @default(PENDING)
+  razorpayId     String?       @unique
+  razorpayOrderId String?
+  isEmi          Boolean       @default(false)
+  emiMonth       Int?
+  paidAt         DateTime?
+  createdAt      DateTime      @default(now())
+
+  user       User       @relation(fields: [userId], references: [id])
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id])
+
+  @@map("payments")
+}
+
+// ── CERTIFICATE ───────────────────────────────────
+
+model Certificate {
+  id          String   @id @default(cuid())
+  userId      String
+  courseId    String
+  uniqueCode  String   @unique @default(cuid())
+  pdfUrl      String?
+  issuedAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("certificates")
+}
+
+// ── INTERNSHIP ────────────────────────────────────
+
+model Internship {
+  id        String           @id @default(cuid())
+  userId    String
+  startDate DateTime
+  endDate   DateTime
+  status    InternshipStatus @default(ACTIVE)
+  stipend   Int              @default(0)
+  createdAt DateTime         @default(now())
+
+  user         User           @relation(fields: [userId], references: [id])
+  checkIns     InternshipCheckIn[]
+  expLetterUrl String?
+
+  @@map("internships")
+}
+
+model InternshipCheckIn {
+  id           String   @id @default(cuid())
+  internshipId String
+  month        Int
+  year         Int
+  notes        String?
+  completedAt  DateTime @default(now())
+
+  internship Internship @relation(fields: [internshipId], references: [id])
+
+  @@map("internship_checkins")
+}
+
+// ── COMMUNITY ─────────────────────────────────────
+
+model DiscussionPost {
+  id        String   @id @default(cuid())
+  sectionId String
+  userId    String
+  content   String
+  parentId  String?  // for replies
+  isAnswer  Boolean  @default(false)
+  isPinned  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  section  Section         @relation(fields: [sectionId], references: [id])
+  user     User            @relation(fields: [userId], references: [id])
+  parent   DiscussionPost? @relation("Replies", fields: [parentId], references: [id])
+  replies  DiscussionPost[] @relation("Replies")
+
+  @@map("discussion_posts")
+}
+
+// ── SESSIONS ──────────────────────────────────────
+
+model MentorSession {
+  id         String    @id @default(cuid())
+  learnerId  String
+  mentorId   String
+  scheduledAt DateTime
+  duration   Int       // minutes
+  meetLink   String?
+  notes      String?
+  recordingUrl String?
+  completedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  learner User @relation("LearnerSessions", fields: [learnerId], references: [id])
+  mentor  User @relation("MentorSessions",  fields: [mentorId],  references: [id])
+
+  @@map("mentor_sessions")
+}
+
+// ── MENTOR NOTES ──────────────────────────────────
+
+model MentorNote {
+  id        String   @id @default(cuid())
+  targetId  String   // learner being noted
+  authorId  String   // admin/mentor writing the note
+  content   String
+  createdAt DateTime @default(now())
+
+  target User @relation("NoteTarget", fields: [targetId], references: [id])
+  author User @relation("NoteAuthor", fields: [authorId], references: [id])
+
+  @@map("mentor_notes")
+}
